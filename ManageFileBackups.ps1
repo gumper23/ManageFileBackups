@@ -4,21 +4,21 @@ param (
     [Parameter(Mandatory=$true)]
     [string]$DirectoryPath,
     [Parameter(Mandatory=$true)]
-    [string]$SaveFileName,
+    [string]$FileName,
     [int]$SleepSeconds = 60
 )
 
 # Function to check if a string ends with 14 digits
 function Test-14DigitEnd {
-    param ([string]$SaveFileName)
-    return $SaveFileName -match '\d{14}$'
+    param ([string]$FileName)
+    return $FileName -match '\d{14}$'
 }
 
 # Function to remove old files based on the number of files to keep
-function Remove-OldFiles {
+function Remove-FilesOld {
     param ([string]$DirectoryPath, [int]$NumberOfFilesToKeep)
     # Get the list of files that end with 14 digits
-    $files = Get-ChildItem -Path $DirectoryPath -File | Where-Object { Test-14DigitEnd -SaveFileName $_.Name }
+    $files = Get-ChildItem -Path $DirectoryPath -File | Where-Object { Test-14DigitEnd -FileName $_.Name }
 
     # Sort files by LastWriteTime (oldest first)
     $sortedFiles = $files | Sort-Object -Property LastWriteTime
@@ -44,7 +44,7 @@ function Remove-OldFiles {
     }
 }
 
-function Compare-BinaryFiles {
+function Compare-FilesBinary {
     param (
         [Parameter(Mandatory=$true)]
         [string]$File1,
@@ -90,45 +90,50 @@ function Compare-BinaryFiles {
 }
 
 # Compare the passed in file with the most recent file ending in a 14 digit number
-function Copy-SaveGameFile {
+function CopyFileIfDifferent {
     param (
         [Parameter(Mandatory=$true)]
-        [string]$SaveFileName,
+        [string]$FileName,
         [Parameter(Mandatory=$true)]
         [string]$DirectoryPath
     )
 
     # Construct the full path to the file to compare with
-    $compareToSaveFilename = Join-Path -Path $DirectoryPath -ChildPath $SaveFileName
+    $compareToFileName = Join-Path -Path $DirectoryPath -ChildPath $FileName
 
     # Get the list of files that end with 14 digits
-    $files = Get-ChildItem -Path $DirectoryPath -File | Where-Object { Test-14DigitEnd -SaveFileName $_.Name }
+    $files = Get-ChildItem -Path $DirectoryPath -File | Where-Object { Test-14DigitEnd -FileName $_.Name }
 
     # Sort files by LastWriteTime (most recent first)
     $sortedFiles = $files | Sort-Object -Property LastWriteTime -Descending
 
     if ($sortedFiles.Count -gt 0) {
         $mostRecentFile = $sortedFiles[0].FullName
-        $areEqual = Compare-BinaryFiles -File1 $compareToSaveFilename -File2 $mostRecentFile
+        $areEqual = Compare-FilesBinary -File1 $compareToFileName -File2 $mostRecentFile
         if (-Not $areEqual) {
             $dateTime = Get-Date -Format "yyyyMMddHHmmss"
-            $newSaveFileName = $compareToSaveFilename + "." + $dateTime
-            Copy-Item -Path $compareToSaveFilename -Destination $newSaveFileName
-            Write-Output "Copied $compareToSaveFilename to $newSaveFileName."
+            $newFileName = $compareToFileName + "." + $dateTime
+            Copy-Item -Path $compareToFileName -Destination $newFileName
+            Write-Output "Copied $compareToFileName to $newFileName."
         }
     }
 }
 
 while ($true) {
-    # Call the Copy-SaveGameFile function with the provided parameters
-    Copy-SaveGameFile -SaveFileName $SaveFileName -DirectoryPath $DirectoryPath
+    # Example call:
+    #  D:\Projects\git\github.com\gumper23\ManageFileBackups\ManageFileBackups.ps1 -NumberOfFilesToKeep 10 -DirectoryPath "C:\Users\rsmith\AppData\LocalLow\RedCandleGames\NineSols\saveslot1" -FileName "flags.sav" -SleepSeconds 120
+    # Linting:
+    # Invoke-ScriptAnalyzer -Path "D:\Projects\git\github.com\gumper23\ManageFileBackups\ManageFileBackups.ps1"
 
-    # Call the Remove-OldFiles function with the provided parameters
-    Remove-OldFiles -DirectoryPath $DirectoryPath -NumberOfFilesToKeep $NumberOfFilesToKeep
+    # Copies the file if it is different from the most recent backup file
+    CopyFileIfDifferent -FileName $FileName -DirectoryPath $DirectoryPath
+
+    # Removes 0 or more backup files
+    Remove-FilesOld -DirectoryPath $DirectoryPath -NumberOfFilesToKeep $NumberOfFilesToKeep
 
     # Display remaining files for verification
-    Get-ChildItem -Path $DirectoryPath -File | Where-Object { Test-14DigitEnd -SaveFileName $_.Name } | Sort-Object -Property LastWriteTime -Descending
+    Get-ChildItem -Path $DirectoryPath -File | Where-Object { Test-14DigitEnd -FileName $_.Name } | Sort-Object -Property LastWriteTime -Descending
 
-    # Sleep for 1 minute before checking again
+    # Sleep for $SleepSeconds (default 1 minute) before checking again
     Start-Sleep -Seconds $SleepSeconds
 }
