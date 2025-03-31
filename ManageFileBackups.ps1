@@ -98,13 +98,8 @@ function CopyFileIfDifferent {
         [string]$DirectoryPath
     )
 
-    # Construct the full path to the file to compare with
     $compareToFileName = Join-Path -Path $DirectoryPath -ChildPath $FileName
-
-    # Get the list of files that end with 14 digits
     $files = Get-ChildItem -Path $DirectoryPath -File | Where-Object { Test-14DigitEnd -FileName $_.Name }
-
-    # Sort files by LastWriteTime (most recent first)
     $sortedFiles = $files | Sort-Object -Property LastWriteTime -Descending
 
     if ($sortedFiles.Count -gt 0) {
@@ -116,6 +111,12 @@ function CopyFileIfDifferent {
             Copy-Item -Path $compareToFileName -Destination $newFileName
             Write-Output "Copied $compareToFileName to $newFileName."
         }
+    } else {
+        # Create initial backup if no previous backups exist
+        $dateTime = Get-Date -Format "yyyyMMddHHmmss"
+        $newFileName = $compareToFileName + "." + $dateTime
+        Copy-Item -Path $compareToFileName -Destination $newFileName
+        Write-Output "Created initial backup: $compareToFileName to $newFileName."
     }
 }
 
