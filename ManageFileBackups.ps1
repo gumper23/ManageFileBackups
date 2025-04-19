@@ -4,7 +4,7 @@ param (
     [Parameter(Mandatory=$true)]
     [string]$DirectoryPath,
     [Parameter(Mandatory=$true)]
-    [string]$FileName,
+    [string]$FileSpec,
     [int]$SleepSeconds = 60
 )
 
@@ -14,11 +14,16 @@ function Test-14DigitEnd {
     return $FileName -match '\d{14}$'
 }
 
-# Function to remove old files based on the number of files to keep
+# Function to remove old files based on the number of files to keep for a specific base filename
 function Remove-FilesOld {
-    param ([string]$DirectoryPath, [int]$NumberOfFilesToKeep)
-    # Get the list of files that end with 14 digits
-    $files = Get-ChildItem -Path $DirectoryPath -File | Where-Object { Test-14DigitEnd -FileName $_.Name }
+    param (
+        [string]$DirectoryPath, 
+        [int]$NumberOfFilesToKeep,
+        [string]$BaseFileName
+    )
+    # Get the list of files that match the base filename and end with 14 digits
+    $files = Get-ChildItem -Path $DirectoryPath -File | 
+             Where-Object { ($_.BaseName -eq $BaseFileName) -and (Test-14DigitEnd -FileName $_.Name) }
 
     # Sort files by LastWriteTime (oldest first)
     $sortedFiles = $files | Sort-Object -Property LastWriteTime
@@ -38,9 +43,9 @@ function Remove-FilesOld {
         } else {
             $fileString = "files"
         }
-        Write-Output "Deleted $($filesToDeleteCount) $fileString."
+        Write-Output "Deleted $($filesToDeleteCount) $fileString for $BaseFileName."
     } else {
-        Write-Output "No files need to be deleted; the directory already contains $($NumberOfFilesToKeep) or fewer files."
+        Write-Output "No files need to be deleted for $BaseFileName; already contains $($NumberOfFilesToKeep) or fewer files."
     }
 }
 
@@ -99,7 +104,11 @@ function CopyFileIfDifferent {
     )
 
     $compareToFileName = Join-Path -Path $DirectoryPath -ChildPath $FileName
-    $files = Get-ChildItem -Path $DirectoryPath -File | Where-Object { Test-14DigitEnd -FileName $_.Name }
+    $baseFileName = [System.IO.Path]::GetFileNameWithoutExtension($FileName)
+    $filesව
+
+    $files = Get-ChildItem -Path $DirectoryPath -File | 
+            Where-Object { ($_.BaseName -eq $baseFileName) -and (Test-14DigitEnd -FileName $_.Name) }
     $sortedFiles = $files | Sort-Object -Property LastWriteTime -Descending
 
     if ($sortedFiles.Count -gt 0) {
@@ -122,18 +131,23 @@ function CopyFileIfDifferent {
 
 while ($true) {
     # Example call:
-    #  D:\Projects\git\github.com\gumper23\ManageFileBackups\ManageFileBackups.ps1 -NumberOfFilesToKeep 10 -DirectoryPath "C:\Users\rsmith\AppData\LocalLow\RedCandleGames\NineSols\saveslot1" -FileName "flags.sav" -SleepSeconds 120
-    # Linting:
-    # Invoke-ScriptAnalyzer -Path "D:\Projects\git\github.com\gumper23\ManageFileBackups\ManageFileBackups.ps1"
+    # d:\Projects\git\github.com\gumper23\ManageFileBackups\ManageFileBackups.ps1 -NumberOfFilesToKeep 10 -DirectoryPath "C:\Users\rsmith\AppData\Local\The First Berserker Khazan\Saved\SaveGames\76561198007820264" -FileSpec "*.sav" -SleepSeconds 120
+    
+    # Get all files matching the filespec
+    $sourceFiles = Get-ChildItem -Path $DirectoryPath -File -Filter $FileSpec
 
-    # Copies the file if it is different from the most recent backup file
-    CopyFileIfDifferent -FileName $FileName -DirectoryPath $DirectoryPath
+    foreach ($file in $sourceFiles) {
+        # Process each matching file
+        CopyFileIfDifferent -FileName $file.Name -DirectoryPath $DirectoryPath
+        
+        # Remove old backups for this specific file
+        Remove-FilesOld -DirectoryPath $DirectoryPath -NumberOfFilesToKeep $NumberOfFilesToKeep -BaseFileName $file.BaseName
+    }
 
-    # Removes 0 or more backup files
-    Remove-FilesOld -DirectoryPath $DirectoryPath -NumberOfFilesToKeep $NumberOfFilesToKeep
-
-    # Display remaining files for verification
-    Get-ChildItem -Path $DirectoryPath -File | Where-Object { Test-14DigitEnd -FileName $_.Name } | Sort-Object -Property LastWriteTime -Descending
+    # Display remaining files for verification (all files ending with 14 digits)
+    Get-ChildItem -Path $DirectoryPath -File | 
+        Where-Object { Test-14DigitEnd -FileName $_.Name } | 
+        Sort-Object -Property LastWriteTime -Descending
 
     # Sleep for $SleepSeconds (default 1 minute) before checking again
     Start-Sleep -Seconds $SleepSeconds
