@@ -94,7 +94,7 @@ function Compare-FilesBinary {
     return $equal
 }
 
-# Compare the passed in file with the most recent file ending in a 14 digit number
+# Compare the passed in file with the most recent file ending in a 14 digit number for the same base file
 function CopyFileIfDifferent {
     param (
         [Parameter(Mandatory=$true)]
@@ -105,10 +105,10 @@ function CopyFileIfDifferent {
 
     $compareToFileName = Join-Path -Path $DirectoryPath -ChildPath $FileName
     $baseFileName = [System.IO.Path]::GetFileNameWithoutExtension($FileName)
-    $filesව
 
+    # Get only backup files for this specific base filename that end with 14 digits
     $files = Get-ChildItem -Path $DirectoryPath -File | 
-            Where-Object { ($_.BaseName -eq $baseFileName) -and (Test-14DigitEnd -FileName $_.Name) }
+             Where-Object { ($_.BaseName -eq $baseFileName) -and (Test-14DigitEnd -FileName $_.Name) }
     $sortedFiles = $files | Sort-Object -Property LastWriteTime -Descending
 
     if ($sortedFiles.Count -gt 0) {
@@ -119,6 +119,10 @@ function CopyFileIfDifferent {
             $newFileName = $compareToFileName + "." + $dateTime
             Copy-Item -Path $compareToFileName -Destination $newFileName
             Write-Output "Copied $compareToFileName to $newFileName."
+            return $true
+        } else {
+            Write-Output "No changes detected for $FileName; no copy needed."
+            return $false
         }
     } else {
         # Create initial backup if no previous backups exist
@@ -126,22 +130,22 @@ function CopyFileIfDifferent {
         $newFileName = $compareToFileName + "." + $dateTime
         Copy-Item -Path $compareToFileName -Destination $newFileName
         Write-Output "Created initial backup: $compareToFileName to $newFileName."
+        return $true
     }
 }
 
 while ($true) {
-    # Example call:
-    # d:\Projects\git\github.com\gumper23\ManageFileBackups\ManageFileBackups.ps1 -NumberOfFilesToKeep 10 -DirectoryPath "C:\Users\rsmith\AppData\Local\The First Berserker Khazan\Saved\SaveGames\76561198007820264" -FileSpec "*.sav" -SleepSeconds 120
-    
     # Get all files matching the filespec
     $sourceFiles = Get-ChildItem -Path $DirectoryPath -File -Filter $FileSpec
 
     foreach ($file in $sourceFiles) {
-        # Process each matching file
-        CopyFileIfDifferent -FileName $file.Name -DirectoryPath $DirectoryPath
+        # Process each matching file and check if it was copied
+        $wasCopied = CopyFileIfDifferent -FileName $file.Name -DirectoryPath $DirectoryPath
         
-        # Remove old backups for this specific file
-        Remove-FilesOld -DirectoryPath $DirectoryPath -NumberOfFilesToKeep $NumberOfFilesToKeep -BaseFileName $file.BaseName
+        # Only remove old files if a new copy was made
+        if ($wasCopied) {
+            Remove-FilesOld -DirectoryPath $DirectoryPath -NumberOfFilesToKeep $NumberOfFilesToKeep -BaseFileName $file.BaseName
+        }
     }
 
     # Display remaining files for verification (all files ending with 14 digits)
