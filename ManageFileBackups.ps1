@@ -120,25 +120,25 @@ function Backup-File {
         [string]$FullFileName
     )
 
-    $fileInfo = Get-Item $FullFileName
-    $fileName = $fileInfo.Name
-    $directoryPath = $fileInfo.DirectoryName
+    $compareToFileName = Join-Path -Path $DirectoryPath -ChildPath $FileName
+    $files = Get-ChildItem -Path $DirectoryPath -File | Where-Object { Test-14DigitEnd -FileName $_.Name }
+    $sortedFiles = $files | Sort-Object -Property LastWriteTime -Descending
 
-    # Get all files in the directory named the same as $fileName but with a 14 digit extension.
-    $backupFiles = Get-ChildItem -Path $directoryPath -File | 
-                   Where-Object { ($_.BaseName -eq $fileName) -and (Test-14DigitEnd -FileName $_.Name) } |
-                   Sort-Object -Property LastWriteTime -Descending
-
-
-    $dateTime = Get-Date -Format "yyyyMMddHHmmss"
-    $backupFileName = "$fileName.$dateTime"
-    $backupFilePath = Join-Path -Path $directoryPath -ChildPath $backupFileName
-
-    # If there is not a backup file, one with a 14 digit extension, create one and exit this function.    
-    if ($backupFiles.Count -eq 0) {
-        Write-Output "No backup file found. Creating new backup."
-        $fileInfo.CopyTo($backupFilePath, $true)
-        return
+    if ($sortedFiles.Count -gt 0) {
+        $mostRecentFile = $sortedFiles[0].FullName
+        $areEqual = Compare-FilesBinary -File1 $compareToFileName -File2 $mostRecentFile
+        if (-Not $areEqual) {
+            $dateTime = Get-Date -Format "yyyyMMddHHmmss"
+            $newFileName = $compareToFileName + "." + $dateTime
+            Copy-Item -Path $compareToFileName -Destination $newFileName
+            Write-Output "Copied $compareToFileName to $newFileName."
+        }
+    } else {
+        # Create initial backup if no previous backups exist
+        $dateTime = Get-Date -Format "yyyyMMddHHmmss"
+        $newFileName = $compareToFileName + "." + $dateTime
+        Copy-Item -Path $compareToFileName -Destination $newFileName
+        Write-Output "Created initial backup: $compareToFileName to $newFileName."
     }
 
     # Compare the most recent backup file with the current file. If they are not equal, create a new backup file and exit.
