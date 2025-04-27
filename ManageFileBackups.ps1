@@ -4,9 +4,34 @@ param (
     [Parameter(Mandatory=$true)]
     [string]$DirectoryPath,
     [Parameter(Mandatory=$true)]
-    [string]$FileName,
+    [string]$FileSpec,
     [int]$SleepSeconds = 60
 )
+# Returns a list of files in the specified directory with the specified extension
+function Get-FilesByExtension {
+    param (
+        [Parameter(Mandatory=$true)]
+        [string]$DirectoryPath,
+        [Parameter(Mandatory=$true)]
+        [string]$Extension
+    )
+    
+    # Validate directory exists
+    if (-not (Test-Path $DirectoryPath)) {
+        throw "Directory '$DirectoryPath' does not exist"
+    }
+    
+    # Clean extension input (remove * if present, ensure . prefix)
+    $Extension = $Extension -replace '^\*', ''
+    if (-not $Extension.StartsWith('.')) {
+        $Extension = ".$Extension"
+    }
+    
+    # Get matching files
+    Get-ChildItem -Path $DirectoryPath -File | 
+        Where-Object { $_.Extension -eq $Extension } |
+        Select-Object -ExpandProperty FullName
+}
 
 # Function to check if a string ends with 14 digits
 function Test-14DigitEnd {
@@ -14,13 +39,18 @@ function Test-14DigitEnd {
     return $FileName -match '\d{14}$'
 }
 
-# Function to remove old files based on the number of files to keep
+# Function to remove old backups for a specific base filename
 function Remove-FilesOld {
-    param ([string]$DirectoryPath, [int]$NumberOfFilesToKeep)
-    # Get the list of files that end with 14 digits
-    $files = Get-ChildItem -Path $DirectoryPath -File | Where-Object { Test-14DigitEnd -FileName $_.Name }
+    param (
+        [string]$DirectoryPath, 
+        [int]$NumberOfFilesToKeep,
+        [string]$BaseFileName
+    )
+    # Get backup files for this base filename ending with 14 digits
+    $files = Get-ChildItem -Path $DirectoryPath -File | 
+             Where-Object { ($_.BaseName -eq $BaseFileName) -and (Test-14DigitEnd -FileName $_.Name) }
 
-    # Sort files by LastWriteTime (oldest first)
+    # Sort by LastWriteTime (oldest first)
     $sortedFiles = $files | Sort-Object -Property LastWriteTime
 
     # Calculate how many files to delete
@@ -33,34 +63,27 @@ function Remove-FilesOld {
         # Delete the selected files
         $filesToDelete | Remove-Item -Force
 
-        if ($filesToDeleteCount -eq 1) {
-            $fileString = "file"
-        } else {
-            $fileString = "files"
-        }
-        Write-Output "Deleted $($filesToDeleteCount) $fileString."
-    } else {
-        Write-Output "No files need to be deleted; the directory already contains $($NumberOfFilesToKeep) or fewer files."
+        $fileString = $filesToDeleteCount -eq 1 ? "file" : "files"
+        Write-Output "Deleted $filesToDeleteCount $fileString for $BaseFileName."
     }
 }
 
+# Function to compare two files binary-wise
 function Compare-FilesBinary {
     param (
         [Parameter(Mandatory=$true)]
         [string]$File1,
         [Parameter(Mandatory=$true)]
         [string]$File2,
-        [uint32]$bufferSize = 524288 # 512 KB buffer size, can be adjusted
+        [uint32]$bufferSize = 524288
     )
 
-    # Check if file sizes are different first for a quick comparison
     $file1Info = Get-Item $File1
     $file2Info = Get-Item $File2
     if ($file1Info.Length -ne $file2Info.Length) {
         return $false
     }
 
-    # If bufferSize is 0, set a default
     if ($bufferSize -eq 0) {
         $bufferSize = 524288
     }
@@ -89,13 +112,12 @@ function Compare-FilesBinary {
     return $equal
 }
 
-# Compare the passed in file with the most recent file ending in a 14 digit number
-function CopyFileIfDifferent {
+# Function to handle backup creation for a single file
+
+function Backup-File {
     param (
         [Parameter(Mandatory=$true)]
-        [string]$FileName,
-        [Parameter(Mandatory=$true)]
-        [string]$DirectoryPath
+        [string]$FullFileName
     )
 
     $compareToFileName = Join-Path -Path $DirectoryPath -ChildPath $FileName
@@ -118,23 +140,23 @@ function CopyFileIfDifferent {
         Copy-Item -Path $compareToFileName -Destination $newFileName
         Write-Output "Created initial backup: $compareToFileName to $newFileName."
     }
+
+    # Compare the most recent backup file with the current file. If they are not equal, create a new backup file and exit.
+    $mostRecentBackup = $backupFiles[0].FullName
+    $areEqual = Compare-FilesBinary -File1 $FullFileName -File2 $mostRecentBackup
+    if (-not $areEqual) {
+        Write-Output "$fileName differs from latest backup. Creating new backup."
+        $fileInfo.CopyTo($backupFilePath, $true)
+        return
+    } 
 }
 
 while ($true) {
-    # Example call:
-    #  D:\Projects\git\github.com\gumper23\ManageFileBackups\ManageFileBackups.ps1 -NumberOfFilesToKeep 10 -DirectoryPath "C:\Users\rsmith\AppData\LocalLow\RedCandleGames\NineSols\saveslot1" -FileName "flags.sav" -SleepSeconds 120
-    # Linting:
-    # Invoke-ScriptAnalyzer -Path "D:\Projects\git\github.com\gumper23\ManageFileBackups\ManageFileBackups.ps1"
-
-    # Copies the file if it is different from the most recent backup file
-    CopyFileIfDifferent -FileName $FileName -DirectoryPath $DirectoryPath
-
-    # Removes 0 or more backup files
-    Remove-FilesOld -DirectoryPath $DirectoryPath -NumberOfFilesToKeep $NumberOfFilesToKeep
-
-    # Display remaining files for verification
-    Get-ChildItem -Path $DirectoryPath -File | Where-Object { Test-14DigitEnd -FileName $_.Name } | Sort-Object -Property LastWriteTime -Descending
-
-    # Sleep for $SleepSeconds (default 1 minute) before checking again
+    $filesToBeBackedup = Get-FilesByExtension -DirectoryPath $DirectoryPath -Extension $FileSpec
+    foreach ($file in $filesToBeBackedup) {
+        Write-Output "Processing file: $file"
+        Backup-File -FullFileName $file
+        Remove-FilesOld -DirectoryPath $DirectoryPath -NumberOfFilesToKeep $NumberOfFilesToKeep -BaseFileName Split-Path $file
+    }
     Start-Sleep -Seconds $SleepSeconds
 }
